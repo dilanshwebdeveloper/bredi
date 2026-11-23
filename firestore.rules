@@ -1,0 +1,47 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function member() {
+      return signedIn() && exists(/databases/$(database)/documents/companies/bredi/users/$(request.auth.uid));
+    }
+
+    function role() {
+      return get(/databases/$(database)/documents/companies/bredi/users/$(request.auth.uid)).data.role;
+    }
+
+    function canReadCompanyData() {
+      return member() && role() in ['admin', 'manager', 'accountant', 'production', 'store', 'hr', 'viewer'];
+    }
+
+    function canManageCompanyData() {
+      return member() && role() in ['admin', 'manager'];
+    }
+
+    match /companies/bredi/users/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || (member() && role() == 'admin'));
+      allow create, update, delete: if signedIn() && request.auth.uid == uid
+        && request.resource.data.role == 'viewer';
+    }
+
+    match /companies/bredi/audit/{eventId} {
+      allow read: if canReadCompanyData();
+      allow create: if canReadCompanyData()
+        && request.resource.data.actorUid == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    match /companies/bredi/{document=**} {
+      allow read: if canReadCompanyData();
+      allow create, update: if canManageCompanyData();
+      allow delete: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
